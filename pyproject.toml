@@ -1,0 +1,12 @@
+[project]
+name = "windup"
+version = "0.1.0"
+description = "Small local schedules for coding agents"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
