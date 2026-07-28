@@ -69,10 +69,7 @@ class TaskTest(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(runner.stat().st_mode), 0o700)
         self.assertIn('mv -f "$1" "$1.1"', runner.read_text())
         self.assertEqual(definition["StandardOutPath"], "/dev/null")
-        self.assertEqual(
-            definition["StandardErrorPath"],
-            str(self.prompt.parent / "useful-task.err.log"),
-        )
+        self.assertEqual(definition["StandardErrorPath"], "/dev/null")
         self.assertIn(f"--add-dir {self.root / 'history'}", runner.read_text())
 
     def test_claude_status_and_removal_are_noops_off_macos(self) -> None:

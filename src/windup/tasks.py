@@ -153,7 +153,7 @@ def _install_claude(task: Task) -> Path:
         "WorkingDirectory": str(task.cwd),
         "StartCalendarInterval": calendar,
         "StandardOutPath": "/dev/null",
-        "StandardErrorPath": str(stderr),
+        "StandardErrorPath": "/dev/null",
         "ProcessType": "Background",
     }
     plist = _launchd_path(task)
