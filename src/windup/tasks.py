@@ -12,6 +12,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+LOG_LIMIT = 1_048_576
+
 
 @dataclass(frozen=True)
 class Task:
@@ -28,6 +30,7 @@ class Task:
     before: tuple[str, ...] = ()
     allowed_tools: tuple[str, ...] = ()
     environment: tuple[tuple[str, str], ...] = ()
+    add_dirs: tuple[Path, ...] = ()
 
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[a-z0-9-]+", self.id):
@@ -54,6 +57,8 @@ def status(task: Task, *, codex_home: Path | None = None) -> bool:
     """Return whether the task is installed and loaded."""
     if task.agent == "codex":
         return _codex_path(task, codex_home or Path.home() / ".codex").exists()
+    if sys.platform != "darwin":
+        return False
     result = subprocess.run(
         ["launchctl", "print", f"gui/{os.getuid()}/{_label(task)}"],
         text=True,
@@ -82,6 +87,8 @@ def remove(task: Task, *, codex_home: Path | None = None) -> None:
     """Remove a task while retaining its prompt and logs."""
     if task.agent == "codex":
         _codex_path(task, codex_home or Path.home() / ".codex").unlink(missing_ok=True)
+        return
+    if sys.platform != "darwin":
         return
     plist = _launchd_path(task)
     subprocess.run(
@@ -135,7 +142,7 @@ def _install_claude(task: Task) -> Path:
     for log in (stdout, stderr):
         log.touch(mode=0o600, exist_ok=True)
         log.chmod(0o600)
-    _private_write(runner, _runner(task), 0o700)
+    _private_write(runner, _runner(task, stdout, stderr), 0o700)
 
     calendar = {"Hour": task.hour, "Minute": 0}
     if task.cadence == "weekly":
@@ -145,7 +152,7 @@ def _install_claude(task: Task) -> Path:
         "ProgramArguments": [str(runner)],
         "WorkingDirectory": str(task.cwd),
         "StartCalendarInterval": calendar,
-        "StandardOutPath": str(stdout),
+        "StandardOutPath": "/dev/null",
         "StandardErrorPath": str(stderr),
         "ProcessType": "Background",
     }
@@ -165,11 +172,17 @@ def _install_claude(task: Task) -> Path:
     return plist
 
 
-def _runner(task: Task) -> str:
+def _runner(task: Task, stdout: Path, stderr: Path) -> str:
     before = f"{shlex.join(task.before)}\n" if task.before else ""
     return f"""#!/bin/sh
 set -eu
 umask 077
+rotate() {{
+  [ ! -f "$1" ] || [ "$(wc -c < "$1")" -lt {LOG_LIMIT} ] || mv -f "$1" "$1.1"
+}}
+rotate {shlex.quote(str(stdout))}
+rotate {shlex.quote(str(stderr))}
+exec >>{shlex.quote(str(stdout))} 2>>{shlex.quote(str(stderr))}
 {_exports(task.environment)}
 {before}exec {shlex.join(_agent_command(task))}
 """
@@ -191,6 +204,8 @@ def _agent_command(task: Task) -> list[str]:
             command.extend(
                 ["--tools", ",".join(tools), "--allowedTools", ",".join(task.allowed_tools)]
             )
+        if task.add_dirs:
+            command.extend(["--add-dir", *(str(path) for path in task.add_dirs)])
     else:
         command = [
             shutil.which("codex") or "codex",
