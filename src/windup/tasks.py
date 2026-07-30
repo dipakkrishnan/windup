@@ -13,6 +13,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+#: launchd/cron weekday numbering (0 = Sunday) mapped to iCalendar day codes.
+_ICAL_DAYS = {0: "SU", 1: "MO", 2: "TU", 3: "WE", 4: "TH", 5: "FR", 6: "SA"}
+
+_CADENCES = {"daily", "weekly", "interval"}
+
+
 @dataclass(frozen=True)
 class Task:
     """A recurring local prompt executed by one coding agent."""
@@ -23,7 +29,10 @@ class Task:
     prompt_path: Path
     cwd: Path
     cadence: str
-    hour: int
+    hour: int = 0
+    minute: int = 0
+    weekday: int = 1
+    interval_minutes: int = 0
     model: str = ""
     before: tuple[str, ...] = ()
     allowed_tools: tuple[str, ...] = ()
@@ -34,10 +43,18 @@ class Task:
             raise ValueError("task id must contain only lowercase letters, numbers, and hyphens")
         if self.agent not in {"claude", "codex"}:
             raise ValueError(f"unsupported agent: {self.agent}")
-        if self.cadence not in {"daily", "weekly"}:
-            raise ValueError("task cadence must be daily or weekly")
-        if not 0 <= self.hour <= 23:
-            raise ValueError("task hour must be between 0 and 23")
+        if self.cadence not in _CADENCES:
+            raise ValueError("task cadence must be daily, weekly, or interval")
+        if self.cadence == "interval":
+            if self.interval_minutes < 1:
+                raise ValueError("interval cadence requires interval_minutes >= 1")
+        else:
+            if not 0 <= self.hour <= 23:
+                raise ValueError("task hour must be between 0 and 23")
+            if not 0 <= self.minute <= 59:
+                raise ValueError("task minute must be between 0 and 59")
+            if self.cadence == "weekly" and self.weekday not in _ICAL_DAYS:
+                raise ValueError("task weekday must be between 0 (Sunday) and 6 (Saturday)")
         if any(not re.fullmatch(r"[A-Z_][A-Z0-9_]*", key) for key, _ in self.environment):
             raise ValueError("task environment contains an invalid variable name")
 
@@ -99,8 +116,7 @@ def _install_codex(task: Task, codex_home: Path) -> Path:
     prompt = task.prompt_path.read_text(encoding="utf-8")
     if task.before:
         prompt = f"First run `{shlex.join(task.before)}`.\n\n{prompt}"
-    weekly = task.cadence == "weekly"
-    rrule = f"FREQ={'WEEKLY;BYDAY=MO' if weekly else 'DAILY'};BYHOUR={task.hour};BYMINUTE=0"
+    rrule = _rrule(task)
     now = int(time.time() * 1000)
     lines = [
         "version = 1",
@@ -137,18 +153,21 @@ def _install_claude(task: Task) -> Path:
         log.chmod(0o600)
     _private_write(runner, _runner(task), 0o700)
 
-    calendar = {"Hour": task.hour, "Minute": 0}
-    if task.cadence == "weekly":
-        calendar["Weekday"] = 1
     definition = {
         "Label": _label(task),
         "ProgramArguments": [str(runner)],
         "WorkingDirectory": str(task.cwd),
-        "StartCalendarInterval": calendar,
         "StandardOutPath": str(stdout),
         "StandardErrorPath": str(stderr),
         "ProcessType": "Background",
     }
+    if task.cadence == "interval":
+        definition["StartInterval"] = task.interval_minutes * 60
+    else:
+        calendar = {"Hour": task.hour, "Minute": task.minute}
+        if task.cadence == "weekly":
+            calendar["Weekday"] = task.weekday
+        definition["StartCalendarInterval"] = calendar
     plist = _launchd_path(task)
     plist.parent.mkdir(parents=True, exist_ok=True)
     _private_write(plist, plistlib.dumps(definition).decode())
@@ -173,6 +192,16 @@ umask 077
 {_exports(task.environment)}
 {before}exec {shlex.join(_agent_command(task))}
 """
+
+
+def _rrule(task: Task) -> str:
+    """Render the task schedule as an iCalendar recurrence rule."""
+    if task.cadence == "interval":
+        return f"FREQ=MINUTELY;INTERVAL={task.interval_minutes}"
+    when = f"BYHOUR={task.hour};BYMINUTE={task.minute}"
+    if task.cadence == "weekly":
+        return f"FREQ=WEEKLY;BYDAY={_ICAL_DAYS[task.weekday]};{when}"
+    return f"FREQ=DAILY;{when}"
 
 
 def _agent_command(task: Task) -> list[str]:
