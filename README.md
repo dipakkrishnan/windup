@@ -30,6 +30,7 @@ agent can be supplied as an argv tuple with `before=("/absolute/tool", "sync")`.
 |---------|-------------|---------|
 | `"daily"` | `hour`, `minute` | `cadence="daily", hour=8, minute=17` |
 | `"weekly"` | `hour`, `minute`, `weekday` | `cadence="weekly", weekday=4, hour=9, minute=11` |
+| `"monthly"` | `hour`, `minute`, `day` | `cadence="monthly", day=1, hour=6, minute=19` |
 | `"interval"` | `interval_minutes` | `cadence="interval", interval_minutes=15` |
 
 `weekday` uses launchd/cron numbering — `0` = Sunday through `6` = Saturday — and
@@ -37,6 +38,13 @@ defaults to `1` (Monday). `minute` defaults to `0`.
 
 `"interval"` maps to launchd's `StartInterval` and to `FREQ=MINUTELY` for Codex; it is
 the only cadence that can run more than once an hour, and it ignores `hour`/`minute`.
+
+`"monthly"` maps to launchd's `StartCalendarInterval` `Day` key and to
+`FREQ=MONTHLY;BYMONTHDAY=N`. `day` is **capped at 28**: launchd does not clamp a
+day the month lacks, it simply never fires, so `day=31` would skip five months a
+year and `day=29`–`30` would skip February. A monthly task deliberately does not
+set `Weekday` alongside `Day` — launchd ANDs the two, so that combination would
+mean "the 1st, but only when it is a Monday" rather than "monthly".
 
 ### A note on `before=` and `set -eu`
 

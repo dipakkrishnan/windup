@@ -16,7 +16,12 @@ from pathlib import Path
 #: launchd/cron weekday numbering (0 = Sunday) mapped to iCalendar day codes.
 _ICAL_DAYS = {0: "SU", 1: "MO", 2: "TU", 3: "WE", 4: "TH", 5: "FR", 6: "SA"}
 
-_CADENCES = {"daily", "weekly", "interval"}
+_CADENCES = {"daily", "weekly", "monthly", "interval"}
+
+#: Highest day-of-month a monthly task may use. launchd simply does not fire in a
+#: month that lacks the requested day, so 29-31 would silently skip February and
+#: the 31st would skip four more months a year.
+_MAX_MONTH_DAY = 28
 
 
 @dataclass(frozen=True)
@@ -32,6 +37,7 @@ class Task:
     hour: int = 0
     minute: int = 0
     weekday: int = 1
+    day: int = 1
     interval_minutes: int = 0
     model: str = ""
     before: tuple[str, ...] = ()
@@ -44,7 +50,7 @@ class Task:
         if self.agent not in {"claude", "codex"}:
             raise ValueError(f"unsupported agent: {self.agent}")
         if self.cadence not in _CADENCES:
-            raise ValueError("task cadence must be daily, weekly, or interval")
+            raise ValueError("task cadence must be daily, weekly, monthly, or interval")
         if self.cadence == "interval":
             if self.interval_minutes < 1:
                 raise ValueError("interval cadence requires interval_minutes >= 1")
@@ -55,6 +61,8 @@ class Task:
                 raise ValueError("task minute must be between 0 and 59")
             if self.cadence == "weekly" and self.weekday not in _ICAL_DAYS:
                 raise ValueError("task weekday must be between 0 (Sunday) and 6 (Saturday)")
+            if self.cadence == "monthly" and not 1 <= self.day <= _MAX_MONTH_DAY:
+                raise ValueError(f"task day must be between 1 and {_MAX_MONTH_DAY}")
         if any(not re.fullmatch(r"[A-Z_][A-Z0-9_]*", key) for key, _ in self.environment):
             raise ValueError("task environment contains an invalid variable name")
 
@@ -167,6 +175,8 @@ def _install_claude(task: Task) -> Path:
         calendar = {"Hour": task.hour, "Minute": task.minute}
         if task.cadence == "weekly":
             calendar["Weekday"] = task.weekday
+        elif task.cadence == "monthly":
+            calendar["Day"] = task.day
         definition["StartCalendarInterval"] = calendar
     plist = _launchd_path(task)
     plist.parent.mkdir(parents=True, exist_ok=True)
@@ -201,6 +211,8 @@ def _rrule(task: Task) -> str:
     when = f"BYHOUR={task.hour};BYMINUTE={task.minute}"
     if task.cadence == "weekly":
         return f"FREQ=WEEKLY;BYDAY={_ICAL_DAYS[task.weekday]};{when}"
+    if task.cadence == "monthly":
+        return f"FREQ=MONTHLY;BYMONTHDAY={task.day};{when}"
     return f"FREQ=DAILY;{when}"
 
 

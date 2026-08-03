@@ -105,6 +105,30 @@ class TaskTest(unittest.TestCase):
         toml = install(codex_task, codex_home=self.root / "codex").read_text()
         self.assertIn("FREQ=MINUTELY;INTERVAL=15", toml)
 
+    def test_monthly_cadence_reaches_both_backends(self) -> None:
+        task = Task(
+            "monthly-task", "Monthly task", "codex", self.prompt, self.root,
+            "monthly", hour=6, minute=19, day=2,
+        )
+        toml = install(task, codex_home=self.root / "codex").read_text()
+        self.assertIn("FREQ=MONTHLY;BYMONTHDAY=2;BYHOUR=6;BYMINUTE=19", toml)
+
+        claude_task = Task(
+            "monthly-task", "Monthly task", "claude", self.prompt, self.root,
+            "monthly", hour=6, minute=19, day=2,
+        )
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with (
+            patch("windup.tasks.Path.home", return_value=self.root),
+            patch("windup.tasks.shutil.which", side_effect=lambda name: f"/bin/{name}"),
+            patch("windup.tasks.subprocess.run", return_value=completed),
+        ):
+            plist = install(claude_task)
+        calendar = plistlib.loads(plist.read_bytes())["StartCalendarInterval"]
+        # No Weekday key: launchd ANDs Day and Weekday, so a stray Weekday would
+        # narrow this to "the 2nd, but only when it is a Monday".
+        self.assertEqual(calendar, {"Hour": 6, "Minute": 19, "Day": 2})
+
     def test_schedule_validation(self) -> None:
         base = ("bad-task", "Bad task", "codex", self.prompt, self.root)
         with self.assertRaises(ValueError):
@@ -115,6 +139,11 @@ class TaskTest(unittest.TestCase):
             Task(*base, "interval", interval_minutes=0)
         with self.assertRaises(ValueError):
             Task(*base, "hourly", hour=9)
+        # 29-31 would silently skip February rather than clamping.
+        with self.assertRaises(ValueError):
+            Task(*base, "monthly", hour=9, day=31)
+        with self.assertRaises(ValueError):
+            Task(*base, "monthly", hour=9, day=0)
 
     def test_run_executes_precommand_before_agent(self) -> None:
         task = Task(
