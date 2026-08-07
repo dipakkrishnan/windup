@@ -55,6 +55,96 @@ class TaskTest(unittest.TestCase):
         subprocess.run(["/bin/sh", "-n", runner], check=True)
         self.assertEqual(stat.S_IMODE(runner.stat().st_mode), 0o700)
 
+    def test_weekday_and_minute_reach_both_backends(self) -> None:
+        task = Task(
+            "thursday-task", "Thursday task", "codex", self.prompt, self.root,
+            "weekly", hour=9, minute=11, weekday=4,
+        )
+        toml = install(task, codex_home=self.root / "codex").read_text()
+        self.assertIn("FREQ=WEEKLY;BYDAY=TH;BYHOUR=9;BYMINUTE=11", toml)
+
+        claude_task = Task(
+            "thursday-task", "Thursday task", "claude", self.prompt, self.root,
+            "weekly", hour=9, minute=11, weekday=4,
+        )
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with (
+            patch("windup.tasks.Path.home", return_value=self.root),
+            patch("windup.tasks.shutil.which", side_effect=lambda name: f"/bin/{name}"),
+            patch("windup.tasks.subprocess.run", return_value=completed),
+        ):
+            plist = install(claude_task)
+        calendar = plistlib.loads(plist.read_bytes())["StartCalendarInterval"]
+        self.assertEqual(calendar, {"Hour": 9, "Minute": 11, "Weekday": 4})
+
+    def test_weekly_still_defaults_to_monday(self) -> None:
+        task = Task("mon-task", "Mon task", "codex", self.prompt, self.root, "weekly", 9)
+        toml = install(task, codex_home=self.root / "codex").read_text()
+        self.assertIn("BYDAY=MO", toml)
+
+    def test_interval_cadence_uses_start_interval(self) -> None:
+        task = Task(
+            "every-15", "Every 15", "claude", self.prompt, self.root,
+            "interval", interval_minutes=15,
+        )
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with (
+            patch("windup.tasks.Path.home", return_value=self.root),
+            patch("windup.tasks.shutil.which", side_effect=lambda name: f"/bin/{name}"),
+            patch("windup.tasks.subprocess.run", return_value=completed),
+        ):
+            plist = install(task)
+        definition = plistlib.loads(plist.read_bytes())
+        self.assertEqual(definition["StartInterval"], 900)
+        self.assertNotIn("StartCalendarInterval", definition)
+
+        codex_task = Task(
+            "every-15", "Every 15", "codex", self.prompt, self.root,
+            "interval", interval_minutes=15,
+        )
+        toml = install(codex_task, codex_home=self.root / "codex").read_text()
+        self.assertIn("FREQ=MINUTELY;INTERVAL=15", toml)
+
+    def test_monthly_cadence_reaches_both_backends(self) -> None:
+        task = Task(
+            "monthly-task", "Monthly task", "codex", self.prompt, self.root,
+            "monthly", hour=6, minute=19, day=2,
+        )
+        toml = install(task, codex_home=self.root / "codex").read_text()
+        self.assertIn("FREQ=MONTHLY;BYMONTHDAY=2;BYHOUR=6;BYMINUTE=19", toml)
+
+        claude_task = Task(
+            "monthly-task", "Monthly task", "claude", self.prompt, self.root,
+            "monthly", hour=6, minute=19, day=2,
+        )
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with (
+            patch("windup.tasks.Path.home", return_value=self.root),
+            patch("windup.tasks.shutil.which", side_effect=lambda name: f"/bin/{name}"),
+            patch("windup.tasks.subprocess.run", return_value=completed),
+        ):
+            plist = install(claude_task)
+        calendar = plistlib.loads(plist.read_bytes())["StartCalendarInterval"]
+        # No Weekday key: launchd ANDs Day and Weekday, so a stray Weekday would
+        # narrow this to "the 2nd, but only when it is a Monday".
+        self.assertEqual(calendar, {"Hour": 6, "Minute": 19, "Day": 2})
+
+    def test_schedule_validation(self) -> None:
+        base = ("bad-task", "Bad task", "codex", self.prompt, self.root)
+        with self.assertRaises(ValueError):
+            Task(*base, "weekly", hour=9, weekday=7)
+        with self.assertRaises(ValueError):
+            Task(*base, "daily", hour=9, minute=60)
+        with self.assertRaises(ValueError):
+            Task(*base, "interval", interval_minutes=0)
+        with self.assertRaises(ValueError):
+            Task(*base, "hourly", hour=9)
+        # 29-31 would silently skip February rather than clamping.
+        with self.assertRaises(ValueError):
+            Task(*base, "monthly", hour=9, day=31)
+        with self.assertRaises(ValueError):
+            Task(*base, "monthly", hour=9, day=0)
+
     def test_run_executes_precommand_before_agent(self) -> None:
         task = Task(
             "useful-task",

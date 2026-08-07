@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Scratch workspace created by windup_selftest.py
+selftest-workspace/
