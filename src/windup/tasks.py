@@ -161,6 +161,8 @@ def _install_claude(task: Task) -> Path:
         capture_output=True,
     )
     if result.returncode:
+        plist.unlink(missing_ok=True)
+        runner.unlink(missing_ok=True)
         raise OSError(result.stderr.strip() or "launchctl bootstrap failed")
     return plist
 
