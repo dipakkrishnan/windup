@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from windup import Task, install, remove, run, status
+from windup import Task, install, list_tasks, remove, run, status
 
 
 class TaskTest(unittest.TestCase):
@@ -24,11 +24,19 @@ class TaskTest(unittest.TestCase):
 
     def test_codex_task_round_trip(self) -> None:
         task = Task("useful-task", "Useful task", "codex", self.prompt, self.root, "weekly", 9)
-        path = install(task, codex_home=self.root / "codex")
+        codex_home = self.root / "codex"
+        self.assertEqual(list_tasks("codex", codex_home=codex_home), [])
+        path = install(task, codex_home=codex_home)
         self.assertIn('BYDAY=MO;BYHOUR=9', path.read_text())
-        self.assertTrue(status(task, codex_home=self.root / "codex"))
-        remove(task, codex_home=self.root / "codex")
-        self.assertFalse(status(task, codex_home=self.root / "codex"))
+        self.assertTrue(status(task, codex_home=codex_home))
+        self.assertEqual(list_tasks("codex", codex_home=codex_home), ["useful-task"])
+        remove(task, codex_home=codex_home)
+        self.assertFalse(status(task, codex_home=codex_home))
+        self.assertEqual(list_tasks("codex", codex_home=codex_home), [])
+
+    def test_list_tasks_rejects_unsupported_agent(self) -> None:
+        with self.assertRaises(ValueError):
+            list_tasks("gemini")
 
     def test_claude_task_is_private_and_valid(self) -> None:
         task = Task(
@@ -48,7 +56,9 @@ class TaskTest(unittest.TestCase):
             patch("windup.tasks.shutil.which", side_effect=lambda name: f"/bin/{name}"),
             patch("windup.tasks.subprocess.run", return_value=completed),
         ):
+            self.assertEqual(list_tasks("claude"), [])
             plist = install(task)
+            self.assertEqual(list_tasks("claude"), ["useful-task"])
         definition = plistlib.loads(plist.read_bytes())
         self.assertEqual(definition["StartCalendarInterval"]["Hour"], 8)
         runner = self.prompt.parent / "useful-task.sh"

@@ -12,6 +12,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+_LABEL_PREFIX = "dev.windup."
+
 
 @dataclass(frozen=True)
 class Task:
@@ -76,6 +78,24 @@ def run(task: Task) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         check=True,
     )
+
+
+def list_tasks(agent: str, *, codex_home: Path | None = None) -> list[str]:
+    """Return the ids of tasks currently installed for the given backend."""
+    if agent == "codex":
+        automations = (codex_home or Path.home() / ".codex") / "automations"
+        if not automations.is_dir():
+            return []
+        return sorted(path.parent.name for path in automations.glob("*/automation.toml"))
+    if agent == "claude":
+        launch_agents = Path.home() / "Library" / "LaunchAgents"
+        if not launch_agents.is_dir():
+            return []
+        return sorted(
+            path.stem[len(_LABEL_PREFIX) :]
+            for path in launch_agents.glob(f"{_LABEL_PREFIX}*.plist")
+        )
+    raise ValueError(f"unsupported agent: {agent}")
 
 
 def remove(task: Task, *, codex_home: Path | None = None) -> None:
@@ -219,7 +239,7 @@ def _codex_path(task: Task, codex_home: Path) -> Path:
 
 
 def _label(task: Task) -> str:
-    return f"dev.windup.{task.id}"
+    return f"{_LABEL_PREFIX}{task.id}"
 
 
 def _launchd_path(task: Task) -> Path:
