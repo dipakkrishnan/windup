@@ -30,6 +30,19 @@ class TaskTest(unittest.TestCase):
         remove(task, codex_home=self.root / "codex")
         self.assertFalse(status(task, codex_home=self.root / "codex"))
 
+    def test_codex_task_rejects_before(self) -> None:
+        with self.assertRaises(ValueError):
+            Task(
+                "useful-task",
+                "Useful task",
+                "codex",
+                self.prompt,
+                self.root,
+                "daily",
+                8,
+                before=("/absolute/tool", "sync"),
+            )
+
     def test_claude_task_is_private_and_valid(self) -> None:
         task = Task(
             "useful-task",
@@ -59,7 +72,7 @@ class TaskTest(unittest.TestCase):
         task = Task(
             "useful-task",
             "Useful task",
-            "codex",
+            "claude",
             self.prompt,
             self.root,
             "daily",
@@ -68,12 +81,12 @@ class TaskTest(unittest.TestCase):
         )
         completed = subprocess.CompletedProcess([], 0, "", "")
         with (
-            patch("windup.tasks.shutil.which", return_value="/bin/codex"),
+            patch("windup.tasks.shutil.which", return_value="/bin/claude"),
             patch("windup.tasks.subprocess.run", return_value=completed) as execute,
         ):
             run(task)
         self.assertEqual(execute.call_args_list[0].args[0], ("/bin/tool", "sync"))
-        self.assertEqual(execute.call_args_list[1].args[0][:2], ["/bin/codex", "exec"])
+        self.assertEqual(execute.call_args_list[1].args[0][:2], ["/bin/claude", "-p"])
 
 
 if __name__ == "__main__":
