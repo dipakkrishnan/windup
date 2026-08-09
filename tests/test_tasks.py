@@ -24,11 +24,20 @@ class TaskTest(unittest.TestCase):
 
     def test_codex_task_round_trip(self) -> None:
         task = Task("useful-task", "Useful task", "codex", self.prompt, self.root, "weekly", 9)
-        path = install(task, codex_home=self.root / "codex")
+        with patch("windup.tasks.shutil.which", return_value="/bin/codex"):
+            path = install(task, codex_home=self.root / "codex")
         self.assertIn('BYDAY=MO;BYHOUR=9', path.read_text())
         self.assertTrue(status(task, codex_home=self.root / "codex"))
         remove(task, codex_home=self.root / "codex")
         self.assertFalse(status(task, codex_home=self.root / "codex"))
+
+    def test_codex_install_rejects_missing_cli(self) -> None:
+        task = Task("useful-task", "Useful task", "codex", self.prompt, self.root, "daily", 8)
+        with (
+            patch("windup.tasks.shutil.which", return_value=None),
+            self.assertRaises(OSError),
+        ):
+            install(task, codex_home=self.root / "codex")
 
     def test_claude_task_is_private_and_valid(self) -> None:
         task = Task(

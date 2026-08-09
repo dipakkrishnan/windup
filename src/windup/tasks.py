@@ -94,6 +94,8 @@ def remove(task: Task, *, codex_home: Path | None = None) -> None:
 
 
 def _install_codex(task: Task, codex_home: Path) -> Path:
+    if not shutil.which("codex"):
+        raise OSError("Codex CLI is not installed")
     path = _codex_path(task, codex_home)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     prompt = task.prompt_path.read_text(encoding="utf-8")
