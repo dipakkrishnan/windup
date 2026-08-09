@@ -76,5 +76,70 @@ class TaskTest(unittest.TestCase):
         self.assertEqual(execute.call_args_list[1].args[0][:2], ["/bin/codex", "exec"])
 
 
+class TaskValidationTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.prompt = self.root / "state/prompt.md"
+        self.prompt.parent.mkdir()
+        self.prompt.write_text("Do the useful thing.")
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def make(self, **overrides) -> Task:
+        kwargs = {
+            "id": "useful-task",
+            "name": "Useful task",
+            "agent": "codex",
+            "prompt_path": self.prompt,
+            "cwd": self.root,
+            "cadence": "daily",
+            "hour": 8,
+        }
+        kwargs.update(overrides)
+        return Task(**kwargs)
+
+    def test_rejects_uppercase_id(self) -> None:
+        with self.assertRaises(ValueError):
+            self.make(id="Useful-Task")
+
+    def test_rejects_id_with_spaces(self) -> None:
+        with self.assertRaises(ValueError):
+            self.make(id="useful task")
+
+    def test_rejects_id_with_symbols(self) -> None:
+        with self.assertRaises(ValueError):
+            self.make(id="useful_task!")
+
+    def test_rejects_unsupported_agent(self) -> None:
+        with self.assertRaises(ValueError):
+            self.make(agent="gpt")
+
+    def test_rejects_invalid_cadence(self) -> None:
+        with self.assertRaises(ValueError):
+            self.make(cadence="monthly")
+
+    def test_rejects_hour_below_range(self) -> None:
+        with self.assertRaises(ValueError):
+            self.make(hour=-1)
+
+    def test_rejects_hour_above_range(self) -> None:
+        with self.assertRaises(ValueError):
+            self.make(hour=24)
+
+    def test_rejects_lowercase_environment_key(self) -> None:
+        with self.assertRaises(ValueError):
+            self.make(environment=(("work_root", "/tmp"),))
+
+    def test_rejects_environment_key_starting_with_digit(self) -> None:
+        with self.assertRaises(ValueError):
+            self.make(environment=(("9WORK_ROOT", "/tmp"),))
+
+    def test_accepts_valid_task(self) -> None:
+        task = self.make(environment=(("WORK_ROOT", "/tmp"),))
+        self.assertEqual(task.id, "useful-task")
+
+
 if __name__ == "__main__":
     unittest.main()
