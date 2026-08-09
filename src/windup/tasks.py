@@ -81,7 +81,12 @@ def run(task: Task) -> subprocess.CompletedProcess[str]:
 def remove(task: Task, *, codex_home: Path | None = None) -> None:
     """Remove a task while retaining its prompt and logs."""
     if task.agent == "codex":
-        _codex_path(task, codex_home or Path.home() / ".codex").unlink(missing_ok=True)
+        path = _codex_path(task, codex_home or Path.home() / ".codex")
+        path.unlink(missing_ok=True)
+        try:
+            path.parent.rmdir()
+        except OSError:
+            pass
         return
     plist = _launchd_path(task)
     subprocess.run(
