@@ -22,4 +22,6 @@ It owns scheduling only; prompts and domain behavior stay in the calling project
 
 `status(task)` checks installation, `run(task)` executes immediately, and
 `remove(task)` removes only Windup's scheduler files. Commands that must run before the
-agent can be supplied as an argv tuple with `before=("/absolute/tool", "sync")`.
+agent can be supplied as an argv tuple with `before=("/absolute/tool", "sync")` — this
+is enforced for the `claude` agent (a real pre-`exec` shell step) but rejected at
+construction time for `codex`, which has no pre-hook mechanism in `automation.toml`.

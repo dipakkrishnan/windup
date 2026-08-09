@@ -40,6 +40,12 @@ class Task:
             raise ValueError("task hour must be between 0 and 23")
         if any(not re.fullmatch(r"[A-Z_][A-Z0-9_]*", key) for key, _ in self.environment):
             raise ValueError("task environment contains an invalid variable name")
+        if self.agent == "codex" and self.before:
+            raise ValueError(
+                "task before is not supported for the codex agent: "
+                "automation.toml has no pre-hook mechanism, so it would only "
+                "be embedded as advisory prompt text with no enforcement"
+            )
 
 
 def install(task: Task, *, codex_home: Path | None = None) -> Path:
@@ -97,8 +103,6 @@ def _install_codex(task: Task, codex_home: Path) -> Path:
     path = _codex_path(task, codex_home)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     prompt = task.prompt_path.read_text(encoding="utf-8")
-    if task.before:
-        prompt = f"First run `{shlex.join(task.before)}`.\n\n{prompt}"
     weekly = task.cadence == "weekly"
     rrule = f"FREQ={'WEEKLY;BYDAY=MO' if weekly else 'DAILY'};BYHOUR={task.hour};BYMINUTE=0"
     now = int(time.time() * 1000)
