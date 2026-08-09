@@ -29,6 +29,15 @@ class TaskTest(unittest.TestCase):
         self.assertTrue(status(task, codex_home=self.root / "codex"))
         remove(task, codex_home=self.root / "codex")
         self.assertFalse(status(task, codex_home=self.root / "codex"))
+        self.assertFalse(path.parent.exists())
+
+    def test_codex_remove_keeps_nonempty_automations_dir(self) -> None:
+        task = Task("useful-task", "Useful task", "codex", self.prompt, self.root, "weekly", 9)
+        path = install(task, codex_home=self.root / "codex")
+        (path.parent / "extra-file").write_text("keep me")
+        remove(task, codex_home=self.root / "codex")
+        self.assertTrue(path.parent.exists())
+        self.assertTrue((path.parent / "extra-file").exists())
 
     def test_claude_task_is_private_and_valid(self) -> None:
         task = Task(
