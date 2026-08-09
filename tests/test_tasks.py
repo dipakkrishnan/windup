@@ -23,9 +23,20 @@ class TaskTest(unittest.TestCase):
         self.temp.cleanup()
 
     def test_codex_task_round_trip(self) -> None:
-        task = Task("useful-task", "Useful task", "codex", self.prompt, self.root, "weekly", 9)
+        task = Task(
+            "useful-task",
+            "Useful task",
+            "codex",
+            self.prompt,
+            self.root,
+            "weekly",
+            9,
+            before=("/bin/tool", "sync"),
+        )
         path = install(task, codex_home=self.root / "codex")
-        self.assertIn('BYDAY=MO;BYHOUR=9', path.read_text())
+        definition = path.read_text()
+        self.assertIn('BYDAY=MO;BYHOUR=9', definition)
+        self.assertIn("First run `/bin/tool sync`", definition)
         self.assertTrue(status(task, codex_home=self.root / "codex"))
         remove(task, codex_home=self.root / "codex")
         self.assertFalse(status(task, codex_home=self.root / "codex"))
@@ -40,11 +51,13 @@ class TaskTest(unittest.TestCase):
             "daily",
             8,
             allowed_tools=("Write",),
+            add_dirs=(self.root / "history",),
             environment=(("WORK_ROOT", str(self.root)),),
         )
         completed = subprocess.CompletedProcess([], 0, "", "")
         with (
             patch("windup.tasks.Path.home", return_value=self.root),
+            patch("windup.tasks.sys.platform", "darwin"),
             patch("windup.tasks.shutil.which", side_effect=lambda name: f"/bin/{name}"),
             patch("windup.tasks.subprocess.run", return_value=completed),
         ):
@@ -54,6 +67,20 @@ class TaskTest(unittest.TestCase):
         runner = self.prompt.parent / "useful-task.sh"
         subprocess.run(["/bin/sh", "-n", runner], check=True)
         self.assertEqual(stat.S_IMODE(runner.stat().st_mode), 0o700)
+        self.assertIn('mv -f "$1" "$1.1"', runner.read_text())
+        self.assertEqual(definition["StandardOutPath"], "/dev/null")
+        self.assertEqual(definition["StandardErrorPath"], "/dev/null")
+        self.assertIn(f"--add-dir {self.root / 'history'}", runner.read_text())
+
+    def test_claude_status_and_removal_are_noops_off_macos(self) -> None:
+        task = Task("useful-task", "Useful task", "claude", self.prompt, self.root, "daily", 8)
+        with (
+            patch("windup.tasks.sys.platform", "linux"),
+            patch("windup.tasks.subprocess.run") as execute,
+        ):
+            self.assertFalse(status(task))
+            remove(task)
+        execute.assert_not_called()
 
     def test_run_executes_precommand_before_agent(self) -> None:
         task = Task(
