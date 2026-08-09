@@ -30,6 +30,19 @@ class TaskTest(unittest.TestCase):
         remove(task, codex_home=self.root / "codex")
         self.assertFalse(status(task, codex_home=self.root / "codex"))
 
+    def test_codex_task_rejects_environment(self) -> None:
+        with self.assertRaises(ValueError):
+            Task(
+                "useful-task",
+                "Useful task",
+                "codex",
+                self.prompt,
+                self.root,
+                "daily",
+                8,
+                environment=(("API_KEY", "secret"),),
+            )
+
     def test_claude_task_is_private_and_valid(self) -> None:
         task = Task(
             "useful-task",

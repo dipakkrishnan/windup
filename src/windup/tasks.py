@@ -40,6 +40,12 @@ class Task:
             raise ValueError("task hour must be between 0 and 23")
         if any(not re.fullmatch(r"[A-Z_][A-Z0-9_]*", key) for key, _ in self.environment):
             raise ValueError("task environment contains an invalid variable name")
+        if self.agent == "codex" and self.environment:
+            raise ValueError(
+                "task environment is not supported for the codex agent: "
+                "automation.toml has no per-automation env mechanism, so it "
+                "would be silently dropped"
+            )
 
 
 def install(task: Task, *, codex_home: Path | None = None) -> Path:
