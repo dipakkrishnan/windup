@@ -55,6 +55,35 @@ class TaskTest(unittest.TestCase):
         subprocess.run(["/bin/sh", "-n", runner], check=True)
         self.assertEqual(stat.S_IMODE(runner.stat().st_mode), 0o700)
 
+    def test_install_claude_cleans_up_after_failed_bootstrap(self) -> None:
+        task = Task(
+            "useful-task",
+            "Useful task",
+            "claude",
+            self.prompt,
+            self.root,
+            "daily",
+            8,
+        )
+
+        def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+            if args[1] == "bootstrap":
+                return subprocess.CompletedProcess(args, 1, "", "bootstrap failed")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        with (
+            patch("windup.tasks.sys.platform", "darwin"),
+            patch("windup.tasks.Path.home", return_value=self.root),
+            patch("windup.tasks.shutil.which", side_effect=lambda name: f"/bin/{name}"),
+            patch("windup.tasks.subprocess.run", side_effect=fake_run),
+        ):
+            with self.assertRaises(OSError):
+                install(task)
+        plist = self.root / "Library/LaunchAgents/dev.windup.useful-task.plist"
+        runner = self.prompt.parent / "useful-task.sh"
+        self.assertFalse(plist.exists())
+        self.assertFalse(runner.exists())
+
     def test_run_executes_precommand_before_agent(self) -> None:
         task = Task(
             "useful-task",
