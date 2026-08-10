@@ -72,6 +72,7 @@ class TaskTest(unittest.TestCase):
             return subprocess.CompletedProcess(args, 0, "", "")
 
         with (
+            patch("windup.tasks.sys.platform", "darwin"),
             patch("windup.tasks.Path.home", return_value=self.root),
             patch("windup.tasks.shutil.which", side_effect=lambda name: f"/bin/{name}"),
             patch("windup.tasks.subprocess.run", side_effect=fake_run),
