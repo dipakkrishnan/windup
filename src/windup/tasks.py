@@ -12,6 +12,20 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+# launchd starts a job with its own minimal environment, not the interactive
+# shell's — a `before` command or agent invocation that only works locally
+# because it inherits a Homebrew PATH, an nvm-managed node, or some other
+# shell-only variable will fail silently once scheduled. This is the base
+# every launchd job actually gets; run() must build on the same base so it is
+# a faithful dry-run of what will happen on schedule.
+_MINIMAL_ENV_KEYS = ("HOME", "LOGNAME", "SHELL", "TMPDIR", "USER")
+
+# The plist definitions this module writes never set an EnvironmentVariables
+# key, so a launchd job gets the OS default PATH, not the caller's — copying
+# os.environ["PATH"] through would still leak the interactive shell's
+# Homebrew/nvm/pyenv entries and defeat the whole point of this module.
+_LAUNCHD_DEFAULT_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
+
 
 @dataclass(frozen=True)
 class Task:
@@ -205,7 +219,14 @@ def _agent_command(task: Task) -> list[str]:
 
 
 def _environment(task: Task) -> dict[str, str]:
-    return {**os.environ, **dict(task.environment)}
+    return {**_base_environment(), **dict(task.environment)}
+
+
+def _base_environment() -> dict[str, str]:
+    """The minimal environment launchd gives a scheduled job, not the caller's."""
+    env = {key: os.environ[key] for key in _MINIMAL_ENV_KEYS if key in os.environ}
+    env["PATH"] = _LAUNCHD_DEFAULT_PATH
+    return env
 
 
 def _exports(environment: tuple[tuple[str, str], ...]) -> str:
