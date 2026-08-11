@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from windup import Task, install, remove, run, status
+from windup.tasks import _environment
 
 
 class TaskTest(unittest.TestCase):
@@ -74,6 +75,42 @@ class TaskTest(unittest.TestCase):
             run(task)
         self.assertEqual(execute.call_args_list[0].args[0], ("/bin/tool", "sync"))
         self.assertEqual(execute.call_args_list[1].args[0][:2], ["/bin/codex", "exec"])
+
+    def test_environment_excludes_ambient_shell_only_variables(self) -> None:
+        task = Task("useful-task", "Useful task", "codex", self.prompt, self.root, "daily", 8)
+        with patch.dict(
+            "os.environ", {"NVM_DIR": "/Users/me/.nvm", "HOME": "/Users/me", "PATH": "/usr/bin"}
+        ):
+            env = _environment(task)
+        self.assertNotIn("NVM_DIR", env)
+        self.assertEqual(env["HOME"], "/Users/me")
+        self.assertEqual(env["PATH"], "/usr/bin")
+
+    def test_environment_layers_declared_vars_over_the_minimal_base(self) -> None:
+        task = Task(
+            "useful-task",
+            "Useful task",
+            "codex",
+            self.prompt,
+            self.root,
+            "daily",
+            8,
+            environment=(("WORK_ROOT", str(self.root)),),
+        )
+        with patch.dict("os.environ", {"WORK_ROOT": "/should-not-win", "PATH": "/usr/bin"}):
+            env = _environment(task)
+        self.assertEqual(env["WORK_ROOT"], str(self.root))
+
+    def test_run_does_not_leak_ambient_environment_to_the_agent(self) -> None:
+        task = Task("useful-task", "Useful task", "codex", self.prompt, self.root, "daily", 8)
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with (
+            patch.dict("os.environ", {"NVM_DIR": "/Users/me/.nvm"}),
+            patch("windup.tasks.shutil.which", return_value="/bin/codex"),
+            patch("windup.tasks.subprocess.run", return_value=completed) as execute,
+        ):
+            run(task)
+        self.assertNotIn("NVM_DIR", execute.call_args_list[0].kwargs["env"])
 
 
 if __name__ == "__main__":
