@@ -42,6 +42,26 @@ class Task:
             raise ValueError("task environment contains an invalid variable name")
 
 
+_STATUS_HISTORY_LIMIT = 20
+
+
+@dataclass(frozen=True)
+class RunHealth:
+    """Outcome of the most recently recorded runs of a task.
+
+    Populated from a sidecar file that `run()` and the scheduled launchd
+    runner both append to. Codex tasks run through Codex's own scheduler, not
+    windup's runner, so windup has no visibility into their scheduled
+    executions — `run_health()` for a codex task only reflects runs made
+    directly through `run()`.
+    """
+
+    runs_recorded: int
+    last_run_at: float
+    last_exit_code: int
+    recent_failures: int
+
+
 def install(task: Task, *, codex_home: Path | None = None) -> Path:
     """Install or update a task using the agent's local scheduler."""
     _validate_paths(task)
@@ -51,7 +71,12 @@ def install(task: Task, *, codex_home: Path | None = None) -> Path:
 
 
 def status(task: Task, *, codex_home: Path | None = None) -> bool:
-    """Return whether the task is installed and loaded."""
+    """Return whether the task is installed and loaded.
+
+    This only checks registration, not whether the task's runs are actually
+    succeeding — a task can be loaded and still fail every scheduled
+    invocation. Use `run_health()` to see recent run outcomes.
+    """
     if task.agent == "codex":
         return _codex_path(task, codex_home or Path.home() / ".codex").exists()
     result = subprocess.run(
@@ -62,20 +87,47 @@ def status(task: Task, *, codex_home: Path | None = None) -> bool:
     return result.returncode == 0
 
 
+def run_health(task: Task) -> RunHealth | None:
+    """Return recent run outcomes recorded by `run()` or the scheduled runner.
+
+    Returns `None` if no runs have been recorded yet.
+    """
+    path = _status_log_path(task)
+    if not path.exists():
+        return None
+    records = [line.split() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if not records:
+        return None
+    exit_codes = [int(code) for _, code in records]
+    last_run_at, last_exit_code = records[-1]
+    return RunHealth(
+        runs_recorded=len(records),
+        last_run_at=float(last_run_at),
+        last_exit_code=int(last_exit_code),
+        recent_failures=sum(1 for code in exit_codes if code != 0),
+    )
+
+
 def run(task: Task) -> subprocess.CompletedProcess[str]:
     """Run a task immediately and wait for it to finish."""
     _validate_paths(task)
     if task.before:
         subprocess.run(task.before, cwd=task.cwd, env=_environment(task), check=True)
     command = _agent_command(task)
-    return subprocess.run(
-        command,
-        cwd=task.cwd,
-        env=_environment(task),
-        text=True,
-        capture_output=True,
-        check=True,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            cwd=task.cwd,
+            env=_environment(task),
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as error:
+        _record_run(task, error.returncode)
+        raise
+    _record_run(task, result.returncode)
+    return result
 
 
 def remove(task: Task, *, codex_home: Path | None = None) -> None:
@@ -132,7 +184,7 @@ def _install_claude(task: Task) -> Path:
     runner = _runner_path(task)
     stdout = state / f"{task.id}.log"
     stderr = state / f"{task.id}.err.log"
-    for log in (stdout, stderr):
+    for log in (stdout, stderr, _status_log_path(task)):
         log.touch(mode=0o600, exist_ok=True)
         log.chmod(0o600)
     _private_write(runner, _runner(task), 0o700)
@@ -166,12 +218,20 @@ def _install_claude(task: Task) -> Path:
 
 
 def _runner(task: Task) -> str:
-    before = f"{shlex.join(task.before)}\n" if task.before else ""
+    before = f"{shlex.join(task.before)}\n  " if task.before else ""
+    status_path = shlex.quote(str(_status_log_path(task)))
     return f"""#!/bin/sh
-set -eu
+set -u
 umask 077
 {_exports(task.environment)}
-{before}exec {shlex.join(_agent_command(task))}
+(
+  set -eu
+  {before}exec {shlex.join(_agent_command(task))}
+)
+code=$?
+printf '%s %s\\n' "$(date +%s)" "$code" >> {status_path}
+tail -n {_STATUS_HISTORY_LIMIT} {status_path} > {status_path}.tmp 2>/dev/null && mv {status_path}.tmp {status_path}
+exit "$code"
 """
 
 
@@ -228,6 +288,20 @@ def _launchd_path(task: Task) -> Path:
 
 def _runner_path(task: Task) -> Path:
     return task.prompt_path.parent / f"{task.id}.sh"
+
+
+def _status_log_path(task: Task) -> Path:
+    return task.prompt_path.parent / f"{task.id}.status"
+
+
+def _record_run(task: Task, exit_code: int) -> None:
+    path = _status_log_path(task)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    existing = path.read_text(encoding="utf-8").splitlines(keepends=True) if path.exists() else []
+    line = f"{int(time.time())} {exit_code}\n"
+    lines = (existing + [line])[-_STATUS_HISTORY_LIMIT:]
+    path.write_text("".join(lines), encoding="utf-8")
+    path.chmod(0o600)
 
 
 def _private_write(path: Path, content: str, mode: int = 0o600) -> None:
