@@ -84,7 +84,28 @@ class TaskTest(unittest.TestCase):
             env = _environment(task)
         self.assertNotIn("NVM_DIR", env)
         self.assertEqual(env["HOME"], "/Users/me")
-        self.assertEqual(env["PATH"], "/usr/bin")
+
+    def test_environment_replaces_ambient_path_with_launchd_default(self) -> None:
+        # A realistic interactive-shell PATH: Homebrew and nvm prefixed ahead
+        # of the system dirs. The installed launchd plist sets no
+        # EnvironmentVariables, so the real scheduled job never sees any of
+        # this — run() must not either, or a `before` command resolvable only
+        # via one of these prefixes would pass locally and fail on schedule.
+        task = Task(
+            "useful-task",
+            "Useful task",
+            "codex",
+            self.prompt,
+            self.root,
+            "daily",
+            8,
+            before=("homebrew-only-tool",),
+        )
+        ambient_path = "/opt/homebrew/bin:/Users/me/.nvm/versions/node/v20/bin:/usr/bin:/bin"
+        with patch.dict("os.environ", {"PATH": ambient_path}):
+            env = _environment(task)
+        self.assertEqual(env["PATH"], "/usr/bin:/bin:/usr/sbin:/sbin")
+        self.assertNotIn("/opt/homebrew/bin", env["PATH"])
 
     def test_environment_layers_declared_vars_over_the_minimal_base(self) -> None:
         task = Task(
