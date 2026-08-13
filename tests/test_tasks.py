@@ -30,6 +30,13 @@ class TaskTest(unittest.TestCase):
         remove(task, codex_home=self.root / "codex")
         self.assertFalse(status(task, codex_home=self.root / "codex"))
 
+    def test_codex_status_false_when_automation_paused_out_of_band(self) -> None:
+        task = Task("useful-task", "Useful task", "codex", self.prompt, self.root, "weekly", 9)
+        path = install(task, codex_home=self.root / "codex")
+        paused = path.read_text().replace('status = "ACTIVE"', 'status = "PAUSED"')
+        path.write_text(paused)
+        self.assertFalse(status(task, codex_home=self.root / "codex"))
+
     def test_claude_task_is_private_and_valid(self) -> None:
         task = Task(
             "useful-task",
