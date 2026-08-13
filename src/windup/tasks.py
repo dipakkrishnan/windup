@@ -54,12 +54,7 @@ def status(task: Task, *, codex_home: Path | None = None) -> bool:
     """Return whether the task is installed and loaded."""
     if task.agent == "codex":
         return _codex_path(task, codex_home or Path.home() / ".codex").exists()
-    result = subprocess.run(
-        ["launchctl", "print", f"gui/{os.getuid()}/{_label(task)}"],
-        text=True,
-        capture_output=True,
-    )
-    return result.returncode == 0
+    return _launchd_loaded(task)
 
 
 def run(task: Task) -> subprocess.CompletedProcess[str]:
@@ -84,11 +79,13 @@ def remove(task: Task, *, codex_home: Path | None = None) -> None:
         _codex_path(task, codex_home or Path.home() / ".codex").unlink(missing_ok=True)
         return
     plist = _launchd_path(task)
-    subprocess.run(
+    result = subprocess.run(
         ["launchctl", "bootout", f"gui/{os.getuid()}", str(plist)],
         text=True,
         capture_output=True,
     )
+    if result.returncode and _launchd_loaded(task):
+        raise OSError(result.stderr.strip() or "launchctl bootout failed")
     plist.unlink(missing_ok=True)
     _runner_path(task).unlink(missing_ok=True)
 
@@ -212,6 +209,15 @@ def _exports(environment: tuple[tuple[str, str], ...]) -> str:
     return "\n".join(
         f"{key}={shlex.quote(value)}\nexport {key}" for key, value in environment
     )
+
+
+def _launchd_loaded(task: Task) -> bool:
+    result = subprocess.run(
+        ["launchctl", "print", f"gui/{os.getuid()}/{_label(task)}"],
+        text=True,
+        capture_output=True,
+    )
+    return result.returncode == 0
 
 
 def _codex_path(task: Task, codex_home: Path) -> Path:
