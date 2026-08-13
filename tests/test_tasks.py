@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from windup import Task, install, remove, run, status
+from windup.tasks import _launchd_path, _runner_path
 
 
 class TaskTest(unittest.TestCase):
@@ -54,6 +55,52 @@ class TaskTest(unittest.TestCase):
         runner = self.prompt.parent / "useful-task.sh"
         subprocess.run(["/bin/sh", "-n", runner], check=True)
         self.assertEqual(stat.S_IMODE(runner.stat().st_mode), 0o700)
+
+    def _install_stub_claude_files(self, task: Task) -> tuple[Path, Path]:
+        # Path.home() must already be patched to a temp dir when this runs —
+        # otherwise it writes stub files into the real ~/Library/LaunchAgents.
+        plist = _launchd_path(task)
+        plist.parent.mkdir(parents=True, exist_ok=True)
+        plist.write_text("stub")
+        runner = _runner_path(task)
+        runner.write_text("stub")
+        return plist, runner
+
+    def test_remove_deletes_files_when_bootout_succeeds(self) -> None:
+        task = Task("useful-task", "Useful task", "claude", self.prompt, self.root, "daily", 8)
+        ok = subprocess.CompletedProcess([], 0, "", "")
+        with patch("windup.tasks.Path.home", return_value=self.root):
+            plist, runner = self._install_stub_claude_files(task)
+            with patch("windup.tasks.subprocess.run", return_value=ok) as run_mock:
+                remove(task)
+            run_mock.assert_called_once()
+            self.assertFalse(plist.exists())
+            self.assertFalse(runner.exists())
+
+    def test_remove_deletes_files_when_bootout_fails_but_job_already_unloaded(self) -> None:
+        task = Task("useful-task", "Useful task", "claude", self.prompt, self.root, "daily", 8)
+        bootout = subprocess.CompletedProcess([], 1, "", "Could not find specified service")
+        not_loaded = subprocess.CompletedProcess([], 3, "", "")
+        with patch("windup.tasks.Path.home", return_value=self.root):
+            plist, runner = self._install_stub_claude_files(task)
+            with patch("windup.tasks.subprocess.run", side_effect=[bootout, not_loaded]):
+                remove(task)
+            self.assertFalse(plist.exists())
+            self.assertFalse(runner.exists())
+
+    def test_remove_raises_and_keeps_files_when_job_still_loaded(self) -> None:
+        task = Task("useful-task", "Useful task", "claude", self.prompt, self.root, "daily", 8)
+        bootout = subprocess.CompletedProcess([], 1, "", "Operation not permitted")
+        still_loaded = subprocess.CompletedProcess([], 0, "", "")
+        with patch("windup.tasks.Path.home", return_value=self.root):
+            plist, runner = self._install_stub_claude_files(task)
+            with (
+                patch("windup.tasks.subprocess.run", side_effect=[bootout, still_loaded]),
+                self.assertRaises(OSError),
+            ):
+                remove(task)
+            self.assertTrue(plist.exists())
+            self.assertTrue(runner.exists())
 
     def test_run_executes_precommand_before_agent(self) -> None:
         task = Task(
