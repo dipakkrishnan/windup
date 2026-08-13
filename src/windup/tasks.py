@@ -217,7 +217,11 @@ def _exports(environment: tuple[tuple[str, str], ...]) -> str:
 def _codex_status_active(path: Path) -> bool:
     if not path.is_file():
         return False
-    match = re.search(r'(?m)^status\s*=\s*"([^"]*)"', path.read_text(encoding="utf-8"))
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    match = re.search(r'(?m)^status\s*=\s*"([^"]*)"', text)
     return match is not None and match.group(1) == "ACTIVE"
 
 
