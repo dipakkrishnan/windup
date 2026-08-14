@@ -53,7 +53,7 @@ def install(task: Task, *, codex_home: Path | None = None) -> Path:
 def status(task: Task, *, codex_home: Path | None = None) -> bool:
     """Return whether the task is installed and loaded."""
     if task.agent == "codex":
-        return _codex_path(task, codex_home or Path.home() / ".codex").exists()
+        return _codex_status_active(_codex_path(task, codex_home or Path.home() / ".codex"))
     result = subprocess.run(
         ["launchctl", "print", f"gui/{os.getuid()}/{_label(task)}"],
         text=True,
@@ -212,6 +212,17 @@ def _exports(environment: tuple[tuple[str, str], ...]) -> str:
     return "\n".join(
         f"{key}={shlex.quote(value)}\nexport {key}" for key, value in environment
     )
+
+
+def _codex_status_active(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    match = re.search(r'(?m)^status\s*=\s*"([^"]*)"', text)
+    return match is not None and match.group(1) == "ACTIVE"
 
 
 def _codex_path(task: Task, codex_home: Path) -> Path:
