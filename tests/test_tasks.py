@@ -3,6 +3,7 @@ from __future__ import annotations
 import plistlib
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,6 +31,7 @@ class TaskTest(unittest.TestCase):
         remove(task, codex_home=self.root / "codex")
         self.assertFalse(status(task, codex_home=self.root / "codex"))
 
+    @unittest.skipUnless(sys.platform == "darwin", "Claude scheduling requires macOS")
     def test_claude_task_is_private_and_valid(self) -> None:
         task = Task(
             "useful-task",
