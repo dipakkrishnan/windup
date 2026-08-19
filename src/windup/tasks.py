@@ -112,7 +112,11 @@ def run(task: Task) -> subprocess.CompletedProcess[str]:
     """Run a task immediately and wait for it to finish."""
     _validate_paths(task)
     if task.before:
-        subprocess.run(task.before, cwd=task.cwd, env=_environment(task), check=True)
+        try:
+            subprocess.run(task.before, cwd=task.cwd, env=_environment(task), check=True)
+        except subprocess.CalledProcessError as error:
+            _record_run(task, error.returncode)
+            raise
     command = _agent_command(task)
     try:
         result = subprocess.run(

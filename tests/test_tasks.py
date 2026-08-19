@@ -104,6 +104,29 @@ class TaskTest(unittest.TestCase):
         self.assertEqual(health.last_exit_code, 1)
         self.assertEqual(health.recent_failures, 1)
 
+    def test_run_records_before_command_failure(self) -> None:
+        task = Task(
+            "useful-task",
+            "Useful task",
+            "codex",
+            self.prompt,
+            self.root,
+            "daily",
+            8,
+            before=("/bin/tool", "sync"),
+        )
+        failure = subprocess.CalledProcessError(3, ["/bin/tool", "sync"])
+        with (
+            patch("windup.tasks.shutil.which", return_value="/bin/codex"),
+            patch("windup.tasks.subprocess.run", side_effect=failure) as execute,
+            self.assertRaises(subprocess.CalledProcessError),
+        ):
+            run(task)
+        execute.assert_called_once()
+        health = run_health(task)
+        self.assertIsInstance(health, RunHealth)
+        self.assertEqual((health.runs_recorded, health.last_exit_code, health.recent_failures), (1, 3, 1))
+
     def test_run_health_caps_history_length(self) -> None:
         task = Task("useful-task", "Useful task", "codex", self.prompt, self.root, "daily", 8)
         path = _status_log_path(task)
